@@ -1,0 +1,402 @@
+// Проект ID-121125: КЦ и чат с оператором
+
+const $fio = document.getElementById('fio');
+const $btn = document.getElementById('findBtn');
+const $banksList = document.getElementById('banks');
+const $details = document.getElementById('details');
+const $container = document.querySelector('.container');
+
+let excelData = null;
+
+// Маппинг колонок банков
+const BANK_COLUMNS = {
+  'Сбер': { 
+    participation: ['Участие Сбер', 'Сбер'], 
+    call: ['Сценарий Сбер (звонок)', 'Сбер (звонок)'], 
+    chat: ['Сценарий Сбер (чат)', 'Сбер (чат)'] 
+  },
+  'ВТБ': { 
+    participation: ['Участие ВТБ', 'ВТБ'], 
+    call: ['Сценарий ВТБ (звонок)', 'ВТБ (звонок)'], 
+    chat: ['Сценарий ВТБ (чат)', 'ВТБ (чат)'] 
+  },
+  'Т-Банк': { 
+    participation: ['Участие Т-Банк', 'Т-Банк'], 
+    call: ['Сценарий Т-Банк (звонок)', 'Т-Банк (звонок)'], 
+    chat: ['Сценарий Т-Банк (чат)', 'Т-Банк (чат)'] 
+  },
+  'Альфа банк': { 
+    participation: ['Участие Альфа банк', 'Альфа банк'], 
+    call: ['Сценарий Альфа банк (звонок)', 'Альфа банк (звонок)'], 
+    chat: ['Сценарий Альфа банк (чат)', 'Альфа банк (чат)'] 
+  }
+};
+
+// Функция для поиска значения в колонке по нескольким возможным названиям
+function findColumnValue(row, possibleNames) {
+  for (const name of possibleNames) {
+    if (row[name] !== undefined && row[name] !== null && row[name] !== '') {
+      return String(row[name]).trim();
+    }
+  }
+  return '';
+}
+
+// Управление состояниями выполнения проверок
+function getCompletionKey(fio, bank, type) {
+  return `121125_${fio}_${bank}_${type}`.replace(/\s+/g, '_');
+}
+
+function getCompletionStatus(fio, bank, type) {
+  const key = getCompletionKey(fio, bank, type);
+  return localStorage.getItem(`completion_${key}`) === 'true';
+}
+
+function setCompletionStatus(fio, bank, type, completed) {
+  const key = getCompletionKey(fio, bank, type);
+  if (completed) {
+    localStorage.setItem(`completion_${key}`, 'true');
+  } else {
+    localStorage.removeItem(`completion_${key}`);
+  }
+}
+
+function toggleCompletion(fio, bank, type) {
+  const currentStatus = getCompletionStatus(fio, bank, type);
+  setCompletionStatus(fio, bank, type, !currentStatus);
+  return !currentStatus;
+}
+
+const statusIndicator = document.createElement('div');
+statusIndicator.className = 'status-indicator';
+document.body.appendChild(statusIndicator);
+
+function normalizeString(text) {
+  if (!text) return '';
+  return text.toString().toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
+}
+
+function htmlEscape(str) {
+  const div = document.createElement('div');
+  div.textContent = str ?? '';
+  return div.innerHTML;
+}
+
+function showStatus(message, isError = false) {
+  statusIndicator.textContent = message;
+  statusIndicator.className = `status-indicator ${isError ? 'error' : 'success'} show`;
+  setTimeout(() => statusIndicator.classList.remove('show'), 3000);
+}
+
+function showLoading(button, text = 'Загрузка...') {
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.innerHTML = `<span class="loading">${text}</span>`;
+  return originalText;
+}
+
+function hideLoading(button, originalText) {
+  button.disabled = false;
+  button.textContent = originalText;
+}
+
+async function loadExcelFile() {
+  try {
+    if (location.protocol === 'file:') {
+      showStatus('Откройте через http://localhost/ (не file://)', true);
+      return false;
+    }
+
+    const fileName = 'ID-121125 - ВТБ КЦ - Для загрузки.xlsx';
+    const withBust = `${fileName}?v=${Date.now()}`;
+    const response = await fetch(encodeURI(withBust), { cache: 'no-store' });
+    
+    if (!response.ok) {
+      throw new Error('Excel файл не найден');
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+    // Ищем лист с данными (обычно первый лист или "Отобранные участники")
+    let sheetName = workbook.SheetNames.find(name => 
+      name.toLowerCase().includes('отобранные') || 
+      name.toLowerCase().includes('участники') ||
+      name.toLowerCase().includes('для загрузки')
+    ) || workbook.SheetNames[0];
+
+    excelData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
+
+    showStatus(`Excel загружен (${excelData.length} записей)`);
+    return true;
+  } catch (e) {
+    console.error(e);
+    showStatus('Ошибка загрузки Excel', true);
+    return false;
+  }
+}
+
+async function findBanks(fio) {
+  if (!excelData) {
+    const ok = await loadExcelFile();
+    if (!ok) return [];
+  }
+
+  const normalizedFio = normalizeString(fio);
+  const results = [];
+
+  excelData.forEach(row => {
+    // Пробуем разные варианты названия колонки с ФИО
+    const testerFio = normalizeString(
+      row['Укажите Ваши ФИО'] || 
+      row['ФИО'] || 
+      row['ФИО тестировщика'] || 
+      ''
+    );
+    
+    if (testerFio.includes(normalizedFio)) {
+      // Проверяем каждый банк
+      Object.keys(BANK_COLUMNS).forEach(bankName => {
+        const bankConfig = BANK_COLUMNS[bankName];
+        const participation = findColumnValue(row, bankConfig.participation);
+        
+        if (participation.toLowerCase() === 'да') {
+          const callScenario = findColumnValue(row, bankConfig.call);
+          const chatScenario = findColumnValue(row, bankConfig.chat);
+          
+          // Добавляем банк если есть хотя бы один сценарий
+          if (callScenario || chatScenario) {
+            results.push({
+              bank: bankName,
+              callScenario: callScenario,
+              chatScenario: chatScenario,
+              fio: row['Укажите Ваши ФИО'] || row['ФИО'] || row['ФИО тестировщика'] || ''
+            });
+          }
+        }
+      });
+    }
+  });
+
+  // Убираем дубликаты банков (если один банк встречается несколько раз)
+  const uniqueBanks = [];
+  const seenBanks = new Set();
+  
+  results.forEach(item => {
+    if (!seenBanks.has(item.bank)) {
+      seenBanks.add(item.bank);
+      uniqueBanks.push(item);
+    } else {
+      // Если банк уже есть, обновляем сценарии если они есть
+      const existing = uniqueBanks.find(b => b.bank === item.bank);
+      if (item.callScenario && !existing.callScenario) existing.callScenario = item.callScenario;
+      if (item.chatScenario && !existing.chatScenario) existing.chatScenario = item.chatScenario;
+    }
+  });
+
+  return uniqueBanks;
+}
+
+function renderBanks(banks, fio) {
+  if (!banks || banks.length === 0) {
+    $banksList.innerHTML = '<div class="bank-item">Банки не найдены для данного ФИО</div>';
+    $banksList.style.display = 'block';
+    $container.classList.add('with-result');
+    return;
+  }
+
+  const html = banks.map(bank => {
+    const callCompleted = getCompletionStatus(fio, bank.bank, 'call');
+    const chatCompleted = getCompletionStatus(fio, bank.bank, 'chat');
+    const allCompleted = callCompleted && chatCompleted;
+    
+    const statusClass = allCompleted ? 'completed' : 'pending';
+    
+    return `
+      <div class="bank-item ${statusClass}" data-bank="${htmlEscape(bank.bank)}" data-fio="${htmlEscape(fio)}">
+        <div class="bank-header">
+          <strong>${htmlEscape(bank.bank)}</strong>
+          <span class="bank-subtitle">(проверка звонка в КЦ и обращения в чат с оператором)</span>
+        </div>
+        <div class="completion-status">
+          <div class="completion-item">
+            <span class="completion-label">Звонок:</span>
+            <div class="completion-toggle ${callCompleted ? 'checked' : ''}" data-type="call" title="${callCompleted ? 'Отменить выполнение' : 'Отметить как выполненное'}"></div>
+          </div>
+          <div class="completion-item">
+            <span class="completion-label">Чат:</span>
+            <div class="completion-toggle ${chatCompleted ? 'checked' : ''}" data-type="chat" title="${chatCompleted ? 'Отменить выполнение' : 'Отметить как выполненное'}"></div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  $banksList.innerHTML = html;
+  $banksList.style.display = 'block';
+  $container.classList.add('with-result');
+
+  // Обработчики событий
+  document.querySelectorAll('.bank-item').forEach(item => {
+    const bank = item.dataset.bank;
+    const fioValue = item.dataset.fio;
+    
+    // Клик на банк открывает инструкцию
+    item.addEventListener('click', (e) => {
+      if (!e.target.classList.contains('completion-toggle')) {
+        showInstruction(bank, fioValue, banks.find(b => b.bank === bank));
+      }
+    });
+
+    // Обработчики для галочек
+    item.querySelectorAll('.completion-toggle').forEach(toggle => {
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const type = toggle.dataset.type;
+        const newStatus = toggleCompletion(fioValue, bank, type);
+        
+        if (newStatus) {
+          toggle.classList.add('checked');
+          toggle.title = 'Отменить выполнение';
+          showStatus(`Проверка "${bank}" (${type === 'call' ? 'звонок' : 'чат'}) отмечена как выполненная`, false);
+        } else {
+          toggle.classList.remove('checked');
+          toggle.title = 'Отметить как выполненное';
+          showStatus(`Отметка выполнения снята с "${bank}" (${type === 'call' ? 'звонок' : 'чат'})`, false);
+        }
+        
+        // Обновляем статус банка
+        const callCompleted = getCompletionStatus(fioValue, bank, 'call');
+        const chatCompleted = getCompletionStatus(fioValue, bank, 'chat');
+        const allCompleted = callCompleted && chatCompleted;
+        
+        if (allCompleted) {
+          item.classList.remove('pending');
+          item.classList.add('completed');
+        } else {
+          item.classList.remove('completed');
+          item.classList.add('pending');
+        }
+      });
+    });
+  });
+}
+
+function showInstruction(bank, fio, bankData) {
+  if (!bankData) return;
+  
+  $details.style.display = 'block';
+  $details.querySelector('.tester').innerHTML = `Тестировщик: <strong>${htmlEscape(fio)}</strong>`;
+  
+  // Сохраняем данные банка в data-атрибуте для доступа из обработчиков
+  const bankInfoDiv = $details.querySelector('.bank-info');
+  bankInfoDiv.innerHTML = `
+    <div><strong>${htmlEscape(bank)}</strong></div>
+    <div class="instruction-types">
+      <div class="instruction-type ${bankData.callScenario ? 'active' : 'disabled'}" data-type="call">
+        <strong>Инструкция для звонка в КЦ</strong>
+      </div>
+      <div class="instruction-type ${bankData.chatScenario ? 'active' : 'disabled'}" data-type="chat">
+        <strong>Инструкция для чата с оператором</strong>
+      </div>
+    </div>
+  `;
+  
+  // Сохраняем данные банка для использования в обработчиках
+  bankInfoDiv.dataset.bankData = JSON.stringify(bankData);
+  
+  // Показываем первую доступную инструкцию
+  let initialType = bankData.callScenario ? 'call' : (bankData.chatScenario ? 'chat' : null);
+  if (initialType) {
+    displayInstruction(bankData, initialType);
+  } else {
+    $details.querySelector('.instruction').innerHTML = '<p>Инструкции не найдены для данного банка.</p>';
+  }
+  
+  // Обработчики переключения между инструкциями
+  $details.querySelectorAll('.instruction-type').forEach(typeEl => {
+    // Удаляем старые обработчики если они есть
+    const newTypeEl = typeEl.cloneNode(true);
+    typeEl.parentNode.replaceChild(newTypeEl, typeEl);
+    
+    newTypeEl.addEventListener('click', () => {
+      const type = newTypeEl.dataset.type;
+      if (newTypeEl.classList.contains('active')) {
+        const savedBankData = JSON.parse(bankInfoDiv.dataset.bankData);
+        displayInstruction(savedBankData, type);
+        // Обновляем активный класс
+        $details.querySelectorAll('.instruction-type').forEach(el => el.classList.remove('selected'));
+        newTypeEl.classList.add('selected');
+      }
+    });
+  });
+  
+  // Устанавливаем первую инструкцию как выбранную
+  if (initialType) {
+    const firstTypeEl = $details.querySelector(`.instruction-type[data-type="${initialType}"]`);
+    if (firstTypeEl) firstTypeEl.classList.add('selected');
+  }
+  
+  $details.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function displayInstruction(bankData, type) {
+  const instructionDiv = $details.querySelector('.instruction');
+  const scenario = type === 'call' ? bankData.callScenario : bankData.chatScenario;
+  
+  if (!scenario) {
+    instructionDiv.innerHTML = `<p>Инструкция для ${type === 'call' ? 'звонка' : 'чата'} не найдена.</p>`;
+    return;
+  }
+  
+  // Форматируем текст инструкции
+  let formattedText = scenario
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  
+  // Делаем ссылки кликабельными
+  formattedText = makeLinksClickable(formattedText);
+  
+  // Сохраняем переносы строк
+  const hasHtml = /<\/?[a-z][\s\S]*?>/i.test(formattedText);
+  formattedText = hasHtml ? formattedText : formattedText.replace(/\n/g, '<br>');
+  
+  instructionDiv.innerHTML = formattedText;
+}
+
+function makeLinksClickable(text) {
+  const urlRegex = /(https?:\/\/[^\s<>"]+)/g;
+  return text.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+}
+
+async function performSearch() {
+  const fio = $fio.value.trim();
+  if (!fio) { 
+    showStatus('Введите ФИО', true); 
+    $fio.focus(); 
+    return; 
+  }
+  
+  const orig = showLoading($btn, 'Поиск банков...');
+  try {
+    const banks = await findBanks(fio);
+    renderBanks(banks, fio);
+    $details.style.display = 'none';
+  } catch (e) {
+    console.error(e); 
+    showStatus('Ошибка поиска', true);
+  } finally { 
+    hideLoading($btn, orig); 
+  }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  $fio.focus();
+  $btn.addEventListener('click', performSearch);
+  $fio.addEventListener('keypress', e => { 
+    if (e.key === 'Enter') performSearch(); 
+  });
+  await loadExcelFile();
+});
+
