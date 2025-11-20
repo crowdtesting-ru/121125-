@@ -315,7 +315,6 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .instruction { 
     border-top: 2px solid var(--border); 
     padding-top: 24px; 
-    white-space: pre-line; 
     font-size: 15px; 
     line-height: 1.7; 
 }
@@ -372,6 +371,159 @@ button:disabled { opacity: .6; cursor: not-allowed; }
     background: rgba(61, 162, 135, 0.1);
     padding: 2px 4px;
     border-radius: 4px;
+}
+
+/* Стили для форматирования инструкций */
+.instruction-header h2 {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--primary);
+    margin: 0 0 24px 0;
+    padding: 16px;
+    background: linear-gradient(135deg, rgba(61,162,135,.15) 0%, rgba(79,181,153,.08) 100%);
+    border-radius: var(--radius-small);
+    border-left: 4px solid var(--primary);
+    text-align: center;
+}
+
+.scenario-highlight {
+    background: #fff9e6;
+    border-left: 4px solid #ffc107;
+    padding: 16px;
+    margin: 16px 0;
+    border-radius: var(--radius-small);
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--text-dark);
+}
+
+.info-highlight {
+    background: #dbeafe;
+    border: 1px solid #60a5fa;
+    border-left: 4px solid #3b82f6;
+    padding: 16px;
+    margin: 16px 0;
+    border-radius: var(--radius-small);
+    font-size: 15px;
+    line-height: 1.6;
+    color: #1e40af !important;
+}
+
+.info-highlight strong {
+    color: #1e40af !important;
+}
+
+.info-highlight em {
+    color: #1e40af !important;
+}
+
+.info-highlight u {
+    color: #1e40af !important;
+}
+
+.blue-text {
+    color: #1e40af !important;
+}
+
+.blue-text strong {
+    color: #1e40af !important;
+}
+
+.blue-text em {
+    color: #1e40af !important;
+}
+
+.blue-text u {
+    color: #1e40af !important;
+}
+
+.info-highlight a {
+    color: #1e40af !important;
+    font-weight: 700;
+}
+
+.warning-highlight {
+    background: #fef3c7;
+    border: 1px solid #fbbf24;
+    border-left: 4px solid #f59e0b;
+    padding: 16px;
+    margin: 16px 0;
+    border-radius: var(--radius-small);
+    font-size: 15px;
+    line-height: 1.6;
+}
+
+.bank-name-placeholder {
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.link-placeholder {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.final-notes-highlight {
+    background: #f8f9fa;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--primary);
+    padding: 16px;
+    margin: 16px 0;
+    border-radius: var(--radius-small);
+    font-size: 15px;
+    line-height: 1.6;
+}
+
+/* Сворачиваемые блоки */
+.collapsible {
+    background: #f8f9fa;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-small);
+    margin: 16px 0;
+    overflow: hidden;
+}
+
+.collapsible-header {
+    padding: 16px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--text-dark);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #e9ecef;
+    transition: background 0.3s ease;
+    user-select: none;
+}
+
+.collapsible-header:hover {
+    background: #dee2e6;
+}
+
+.collapsible-header .arrow {
+    transition: transform 0.3s ease;
+    font-size: 14px;
+    color: var(--primary);
+}
+
+.collapsible:not(.active) .collapsible-header .arrow {
+    transform: rotate(-90deg);
+}
+
+.collapsible-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease;
+}
+
+.collapsible.active .collapsible-content {
+    max-height: 2000px;
+}
+
+.collapsible-inner {
+    padding: 20px;
+    line-height: 1.7;
 }
 
 .status-indicator { 

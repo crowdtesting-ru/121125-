@@ -7,6 +7,7 @@ const $details = document.getElementById('details');
 const $container = document.querySelector('.container');
 
 let excelData = null;
+let instructionTemplates = null;
 
 // Маппинг колонок банков
 const BANK_COLUMNS = {
@@ -98,6 +99,25 @@ function showLoading(button, text = 'Загрузка...') {
 function hideLoading(button, originalText) {
   button.disabled = false;
   button.textContent = originalText;
+}
+
+async function loadInstructionTemplates() {
+  try {
+    if (location.protocol === 'file:') {
+      return false;
+    }
+
+    const response = await fetch('bank-instructions.json?v=' + Date.now(), { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error('JSON файл не найден');
+    }
+
+    instructionTemplates = await response.json();
+    return true;
+  } catch (e) {
+    console.error('Ошибка загрузки шаблонов инструкций:', e);
+    return false;
+  }
 }
 
 async function loadExcelFile() {
@@ -206,11 +226,48 @@ function renderBanks(banks, fio) {
   }
 
   const html = banks.map(bank => {
-    const callCompleted = getCompletionStatus(fio, bank.bank, 'call');
-    const chatCompleted = getCompletionStatus(fio, bank.bank, 'chat');
-    const allCompleted = callCompleted && chatCompleted;
+    // Проверяем наличие сценариев (исключаем пустые строки и "Без обращения")
+    const hasCallScenario = bank.callScenario && 
+                            bank.callScenario.trim() !== '' && 
+                            !bank.callScenario.toLowerCase().includes('без обращения');
+    const hasChatScenario = bank.chatScenario && 
+                            bank.chatScenario.trim() !== '' && 
+                            !bank.chatScenario.toLowerCase().includes('без обращения');
+    
+    // Получаем статусы завершения только для существующих сценариев
+    const callCompleted = hasCallScenario ? getCompletionStatus(fio, bank.bank, 'call') : false;
+    const chatCompleted = hasChatScenario ? getCompletionStatus(fio, bank.bank, 'chat') : false;
+    
+    // Банк завершен если завершены все доступные сценарии
+    let allCompleted = false;
+    if (hasCallScenario && hasChatScenario) {
+      allCompleted = callCompleted && chatCompleted;
+    } else if (hasCallScenario) {
+      allCompleted = callCompleted;
+    } else if (hasChatScenario) {
+      allCompleted = chatCompleted;
+    }
     
     const statusClass = allCompleted ? 'completed' : 'pending';
+    
+    // Формируем HTML для чекбоксов только для существующих сценариев
+    let completionItemsHtml = '';
+    if (hasCallScenario) {
+      completionItemsHtml += `
+        <div class="completion-item">
+          <span class="completion-label">Звонок:</span>
+          <div class="completion-toggle ${callCompleted ? 'checked' : ''}" data-type="call" title="${callCompleted ? 'Отменить выполнение' : 'Отметить как выполненное'}"></div>
+        </div>
+      `;
+    }
+    if (hasChatScenario) {
+      completionItemsHtml += `
+        <div class="completion-item">
+          <span class="completion-label">Чат:</span>
+          <div class="completion-toggle ${chatCompleted ? 'checked' : ''}" data-type="chat" title="${chatCompleted ? 'Отменить выполнение' : 'Отметить как выполненное'}"></div>
+        </div>
+      `;
+    }
     
     return `
       <div class="bank-item ${statusClass}" data-bank="${htmlEscape(bank.bank)}" data-fio="${htmlEscape(fio)}">
@@ -219,14 +276,7 @@ function renderBanks(banks, fio) {
           <span class="bank-subtitle">(проверка звонка в КЦ и обращения в чат с оператором)</span>
         </div>
         <div class="completion-status">
-          <div class="completion-item">
-            <span class="completion-label">Звонок:</span>
-            <div class="completion-toggle ${callCompleted ? 'checked' : ''}" data-type="call" title="${callCompleted ? 'Отменить выполнение' : 'Отметить как выполненное'}"></div>
-          </div>
-          <div class="completion-item">
-            <span class="completion-label">Чат:</span>
-            <div class="completion-toggle ${chatCompleted ? 'checked' : ''}" data-type="chat" title="${chatCompleted ? 'Отменить выполнение' : 'Отметить как выполненное'}"></div>
-          </div>
+          ${completionItemsHtml}
         </div>
       </div>
     `;
@@ -265,17 +315,35 @@ function renderBanks(banks, fio) {
           showStatus(`Отметка выполнения снята с "${bank}" (${type === 'call' ? 'звонок' : 'чат'})`, false);
         }
         
-        // Обновляем статус банка
-        const callCompleted = getCompletionStatus(fioValue, bank, 'call');
-        const chatCompleted = getCompletionStatus(fioValue, bank, 'chat');
-        const allCompleted = callCompleted && chatCompleted;
-        
-        if (allCompleted) {
-          item.classList.remove('pending');
-          item.classList.add('completed');
-        } else {
-          item.classList.remove('completed');
-          item.classList.add('pending');
+        // Обновляем статус банка с учетом только существующих сценариев
+        const bankData = banks.find(b => b.bank === bank);
+        if (bankData) {
+          const hasCallScenario = bankData.callScenario && 
+                                  bankData.callScenario.trim() !== '' && 
+                                  !bankData.callScenario.toLowerCase().includes('без обращения');
+          const hasChatScenario = bankData.chatScenario && 
+                                  bankData.chatScenario.trim() !== '' && 
+                                  !bankData.chatScenario.toLowerCase().includes('без обращения');
+          
+          const callCompleted = hasCallScenario ? getCompletionStatus(fioValue, bank, 'call') : false;
+          const chatCompleted = hasChatScenario ? getCompletionStatus(fioValue, bank, 'chat') : false;
+          
+          let allCompleted = false;
+          if (hasCallScenario && hasChatScenario) {
+            allCompleted = callCompleted && chatCompleted;
+          } else if (hasCallScenario) {
+            allCompleted = callCompleted;
+          } else if (hasChatScenario) {
+            allCompleted = chatCompleted;
+          }
+          
+          if (allCompleted) {
+            item.classList.remove('pending');
+            item.classList.add('completed');
+          } else {
+            item.classList.remove('completed');
+            item.classList.add('pending');
+          }
         }
       });
     });
@@ -288,17 +356,38 @@ function showInstruction(bank, fio, bankData) {
   $details.style.display = 'block';
   $details.querySelector('.tester').innerHTML = `Тестировщик: <strong>${htmlEscape(fio)}</strong>`;
   
+  // Проверяем наличие сценариев (исключаем пустые строки и "Без обращения")
+  const hasCallScenario = bankData.callScenario && 
+                          bankData.callScenario.trim() !== '' && 
+                          !bankData.callScenario.toLowerCase().includes('без обращения');
+  const hasChatScenario = bankData.chatScenario && 
+                          bankData.chatScenario.trim() !== '' && 
+                          !bankData.chatScenario.toLowerCase().includes('без обращения');
+  
   // Сохраняем данные банка в data-атрибуте для доступа из обработчиков
   const bankInfoDiv = $details.querySelector('.bank-info');
+  
+  // Формируем HTML только для доступных вкладок
+  let instructionTypesHtml = '';
+  if (hasCallScenario) {
+    instructionTypesHtml += `
+      <div class="instruction-type active" data-type="call">
+        <strong>Инструкция для звонка в колл-центр</strong>
+      </div>
+    `;
+  }
+  if (hasChatScenario) {
+    instructionTypesHtml += `
+      <div class="instruction-type active" data-type="chat">
+        <strong>Инструкция для обращения в чат поддержки</strong>
+      </div>
+    `;
+  }
+  
   bankInfoDiv.innerHTML = `
     <div><strong>${htmlEscape(bank)}</strong></div>
     <div class="instruction-types">
-      <div class="instruction-type ${bankData.callScenario ? 'active' : 'disabled'}" data-type="call">
-        <strong>Инструкция для звонка в КЦ</strong>
-      </div>
-      <div class="instruction-type ${bankData.chatScenario ? 'active' : 'disabled'}" data-type="chat">
-        <strong>Инструкция для чата с оператором</strong>
-      </div>
+      ${instructionTypesHtml}
     </div>
   `;
   
@@ -306,7 +395,7 @@ function showInstruction(bank, fio, bankData) {
   bankInfoDiv.dataset.bankData = JSON.stringify(bankData);
   
   // Показываем первую доступную инструкцию
-  let initialType = bankData.callScenario ? 'call' : (bankData.chatScenario ? 'chat' : null);
+  let initialType = hasCallScenario ? 'call' : (hasChatScenario ? 'chat' : null);
   if (initialType) {
     displayInstruction(bankData, initialType);
   } else {
@@ -349,16 +438,43 @@ function displayInstruction(bankData, type) {
     return;
   }
   
-  // Форматируем текст инструкции
+  // Используем шаблон из JSON если доступен
+  if (instructionTemplates) {
+    const templateKey = type === 'call' ? 'call_center' : 'chat';
+    const template = instructionTemplates[templateKey];
+    
+    if (template) {
+      let content = template.content;
+      
+      // Заменяем плейсхолдеры
+      content = content.replace(/{BANK_NAME}/g, htmlEscape(bankData.bank || ''));
+      content = content.replace(/{SCENARIO}/g, htmlEscape(scenario));
+      
+      // Извлекаем ссылку из сценария если есть
+      const linkMatch = scenario.match(/https?:\/\/[^\s<>"]+/);
+      const link = linkMatch ? linkMatch[0] : '';
+      const linkHtml = link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">${link}</a>` : '';
+      content = content.replace(/{LINK}/g, linkHtml);
+      
+      // Преобразуем переносы строк
+      content = content.replace(/\n/g, '<br>');
+      
+      instructionDiv.innerHTML = content;
+      
+      // Активируем сворачиваемые блоки
+      initCollapsibles();
+      
+      return;
+    }
+  }
+  
+  // Fallback на старый формат если JSON не загружен
   let formattedText = scenario
     .replace(/\r\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   
-  // Делаем ссылки кликабельными
   formattedText = makeLinksClickable(formattedText);
-  
-  // Сохраняем переносы строк
   const hasHtml = /<\/?[a-z][\s\S]*?>/i.test(formattedText);
   formattedText = hasHtml ? formattedText : formattedText.replace(/\n/g, '<br>');
   
@@ -368,6 +484,19 @@ function displayInstruction(bankData, type) {
 function makeLinksClickable(text) {
   const urlRegex = /(https?:\/\/[^\s<>"]+)/g;
   return text.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+}
+
+function initCollapsibles() {
+  // Удаляем старые обработчики и добавляем новые
+  document.querySelectorAll('.collapsible-header').forEach(header => {
+    const newHeader = header.cloneNode(true);
+    header.parentNode.replaceChild(newHeader, header);
+    
+    newHeader.addEventListener('click', () => {
+      const collapsible = newHeader.parentElement;
+      collapsible.classList.toggle('active');
+    });
+  });
 }
 
 async function performSearch() {
@@ -397,6 +526,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $fio.addEventListener('keypress', e => { 
     if (e.key === 'Enter') performSearch(); 
   });
+  await loadInstructionTemplates();
   await loadExcelFile();
 });
 
