@@ -397,13 +397,30 @@ button:disabled { opacity: .6; cursor: not-allowed; }
     color: var(--text-dark);
 }
 
+.info-highlight-wrapper {
+    margin: 16px 0;
+    position: relative;
+}
+
+.info-highlight-header {
+    background: #1e40af;
+    color: white;
+    padding: 8px 16px;
+    font-weight: 700;
+    font-size: 15px;
+    border-radius: var(--radius-small) var(--radius-small) 0 0;
+    display: inline-block;
+    margin-bottom: 0;
+}
+
 .info-highlight {
     background: #dbeafe;
     border: 1px solid #60a5fa;
     border-left: 4px solid #3b82f6;
+    border-top: none;
     padding: 16px;
-    margin: 16px 0;
-    border-radius: var(--radius-small);
+    margin: 0;
+    border-radius: 0 var(--radius-small) var(--radius-small) var(--radius-small);
     font-size: 15px;
     line-height: 1.6;
     color: #1e40af !important;
