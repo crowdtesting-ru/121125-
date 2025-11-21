@@ -8,6 +8,7 @@ const $container = document.querySelector('.container');
 
 let excelData = null;
 let instructionTemplates = null;
+let instructionLinks = null; // Данные с листа "Ссылки на инструкции"
 
 // Маппинг колонок банков
 const BANK_COLUMNS = {
@@ -120,6 +121,20 @@ async function loadInstructionTemplates() {
   }
 }
 
+// Функция для проверки, содержит ли значение слово "сценарий" и цифру
+function hasScenario(value) {
+  if (!value || typeof value !== 'string') return false;
+  const normalized = value.toLowerCase().trim();
+  // Проверяем на пустые значения, прочерки и т.д.
+  if (normalized === '' || normalized === '-' || normalized === '—' || normalized === 'нет' || normalized === 'без обращения') {
+    return false;
+  }
+  // Проверяем наличие слова "сценарий" И цифры
+  const hasScenarioWord = normalized.includes('сценарий');
+  const hasDigit = /\d/.test(normalized);
+  return hasScenarioWord && hasDigit;
+}
+
 async function loadExcelFile() {
   try {
     if (location.protocol === 'file:') {
@@ -147,6 +162,20 @@ async function loadExcelFile() {
 
     excelData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
 
+    // Загружаем данные с листа "Ссылки на инструкции"
+    const linksSheetName = workbook.SheetNames.find(name => 
+      name.toLowerCase().includes('ссылки') && name.toLowerCase().includes('инструкции')
+    );
+    
+    if (linksSheetName) {
+      // Читаем как массив массивов для сохранения структуры
+      const linksSheet = workbook.Sheets[linksSheetName];
+      const linksData = XLSX.utils.sheet_to_json(linksSheet, { header: 1, defval: '' });
+      instructionLinks = linksData;
+    } else {
+      instructionLinks = [];
+    }
+
     showStatus(`Excel загружен (${excelData.length} записей)`);
     return true;
   } catch (e) {
@@ -154,6 +183,82 @@ async function loadExcelFile() {
     showStatus('Ошибка загрузки Excel', true);
     return false;
   }
+}
+
+// Функция для поиска ссылки по банку и номеру сценария
+function findInstructionLink(bankName, scenarioText) {
+  console.log('=== ПОИСК ССЫЛКИ ===');
+  console.log('Банк:', bankName);
+  console.log('Текст сценария:', scenarioText);
+  console.log('instructionLinks загружен:', !!instructionLinks, 'длина:', instructionLinks ? instructionLinks.length : 0);
+  
+  if (!instructionLinks || instructionLinks.length === 0) {
+    console.log('ОШИБКА: instructionLinks пуст');
+    return '';
+  }
+  if (!scenarioText || typeof scenarioText !== 'string') {
+    console.log('ОШИБКА: scenarioText пуст или не строка');
+    return '';
+  }
+  
+  // Маппинг названий банков на индексы колонок (B=1, C=2, D=3, E=4)
+  const bankColumnMap = {
+    'Сбер': 1,
+    'ВТБ': 2,
+    'Т-Банк': 3,
+    'Альфа банк': 4,
+    'Альфа-банк': 4
+  };
+  
+  // Определяем индекс колонки для банка
+  const columnIndex = bankColumnMap[bankName];
+  console.log('Индекс колонки для банка', bankName, ':', columnIndex);
+  if (columnIndex === undefined) {
+    console.log('ОШИБКА: Банк не найден в маппинге');
+    return '';
+  }
+  
+  // Извлекаем номер сценария из текста (например, "Сценарий 1" -> "Сценарий 1")
+  const scenarioMatch = scenarioText.match(/сценарий\s*\d+/i);
+  if (!scenarioMatch) {
+    console.log('ОШИБКА: Не найден номер сценария в тексте:', scenarioText);
+    return '';
+  }
+  
+  const scenarioName = scenarioMatch[0].trim();
+  const normalizedScenario = scenarioName.toLowerCase();
+  console.log('Ищем сценарий:', scenarioName, 'нормализованный:', normalizedScenario);
+  
+  // Пропускаем первую строку (заголовки)
+  console.log('Проверяем строки на листе "Ссылки на инструкции":');
+  for (let i = 1; i < instructionLinks.length; i++) {
+    const row = instructionLinks[i];
+    if (!row || row.length === 0) continue;
+    
+    // Проверяем первую колонку (A, индекс 0) на совпадение с номером сценария
+    const firstCell = String(row[0] || '').trim();
+    if (!firstCell) continue;
+    
+    const normalizedFirstCell = firstCell.toLowerCase();
+    console.log(`  Строка ${i}: "${firstCell}" (нормализовано: "${normalizedFirstCell}")`);
+    
+    // Ищем точное совпадение (например, "сценарий 1" === "сценарий 1")
+    if (normalizedFirstCell === normalizedScenario) {
+      console.log('  ✓ НАЙДЕНО СОВПАДЕНИЕ!');
+      // Берем значение из соответствующей колонки банка
+      const link = String(row[columnIndex] || '').trim();
+      console.log(`  Значение в колонке ${columnIndex}: "${link}"`);
+      if (link) {
+        console.log('  ✓ ССЫЛКА НАЙДЕНА:', link);
+        return link;
+      } else {
+        console.log('  ✗ Ссылка пуста в ячейке');
+      }
+    }
+  }
+  
+  console.log('✗ ССЫЛКА НЕ НАЙДЕНА');
+  return '';
 }
 
 async function findBanks(fio) {
@@ -181,8 +286,12 @@ async function findBanks(fio) {
         const participation = findColumnValue(row, bankConfig.participation);
         
         if (participation.toLowerCase() === 'да') {
-          const callScenario = findColumnValue(row, bankConfig.call);
-          const chatScenario = findColumnValue(row, bankConfig.chat);
+          const callScenarioRaw = findColumnValue(row, bankConfig.call);
+          const chatScenarioRaw = findColumnValue(row, bankConfig.chat);
+          
+          // Проверяем наличие слова "сценарий" в ячейках
+          const callScenario = hasScenario(callScenarioRaw) ? callScenarioRaw : '';
+          const chatScenario = hasScenario(chatScenarioRaw) ? chatScenarioRaw : '';
           
           // Добавляем банк если есть хотя бы один сценарий
           if (callScenario || chatScenario) {
@@ -218,21 +327,23 @@ async function findBanks(fio) {
 }
 
 function renderBanks(banks, fio) {
+  const $instructionText = document.getElementById('instructionText');
+  
   if (!banks || banks.length === 0) {
     $banksList.innerHTML = '<div class="bank-item">Банки не найдены для данного ФИО</div>';
     $banksList.style.display = 'block';
+    $instructionText.style.display = 'none';
     $container.classList.add('with-result');
     return;
   }
+  
+  // Показываем текст только когда есть найденные банки
+  $instructionText.style.display = 'block';
 
   const html = banks.map(bank => {
-    // Проверяем наличие сценариев (исключаем пустые строки и "Без обращения")
-    const hasCallScenario = bank.callScenario && 
-                            bank.callScenario.trim() !== '' && 
-                            !bank.callScenario.toLowerCase().includes('без обращения');
-    const hasChatScenario = bank.chatScenario && 
-                            bank.chatScenario.trim() !== '' && 
-                            !bank.chatScenario.toLowerCase().includes('без обращения');
+    // Проверяем наличие сценариев через функцию hasScenario
+    const hasCallScenario = hasScenario(bank.callScenario);
+    const hasChatScenario = hasScenario(bank.chatScenario);
     
     // Получаем статусы завершения только для существующих сценариев
     const callCompleted = hasCallScenario ? getCompletionStatus(fio, bank.bank, 'call') : false;
@@ -318,12 +429,8 @@ function renderBanks(banks, fio) {
         // Обновляем статус банка с учетом только существующих сценариев
         const bankData = banks.find(b => b.bank === bank);
         if (bankData) {
-          const hasCallScenario = bankData.callScenario && 
-                                  bankData.callScenario.trim() !== '' && 
-                                  !bankData.callScenario.toLowerCase().includes('без обращения');
-          const hasChatScenario = bankData.chatScenario && 
-                                  bankData.chatScenario.trim() !== '' && 
-                                  !bankData.chatScenario.toLowerCase().includes('без обращения');
+          const hasCallScenario = hasScenario(bankData.callScenario);
+          const hasChatScenario = hasScenario(bankData.chatScenario);
           
           const callCompleted = hasCallScenario ? getCompletionStatus(fioValue, bank, 'call') : false;
           const chatCompleted = hasChatScenario ? getCompletionStatus(fioValue, bank, 'chat') : false;
@@ -356,13 +463,9 @@ function showInstruction(bank, fio, bankData) {
   $details.style.display = 'block';
   $details.querySelector('.tester').innerHTML = `Тестировщик: <strong>${htmlEscape(fio)}</strong>`;
   
-  // Проверяем наличие сценариев (исключаем пустые строки и "Без обращения")
-  const hasCallScenario = bankData.callScenario && 
-                          bankData.callScenario.trim() !== '' && 
-                          !bankData.callScenario.toLowerCase().includes('без обращения');
-  const hasChatScenario = bankData.chatScenario && 
-                          bankData.chatScenario.trim() !== '' && 
-                          !bankData.chatScenario.toLowerCase().includes('без обращения');
+  // Проверяем наличие сценариев через функцию hasScenario
+  const hasCallScenario = hasScenario(bankData.callScenario);
+  const hasChatScenario = hasScenario(bankData.chatScenario);
   
   // Сохраняем данные банка в data-атрибуте для доступа из обработчиков
   const bankInfoDiv = $details.querySelector('.bank-info');
@@ -433,7 +536,7 @@ function displayInstruction(bankData, type) {
   const instructionDiv = $details.querySelector('.instruction');
   const scenario = type === 'call' ? bankData.callScenario : bankData.chatScenario;
   
-  if (!scenario) {
+  if (!hasScenario(scenario)) {
     instructionDiv.innerHTML = `<p>Инструкция для ${type === 'call' ? 'звонка' : 'чата'} не найдена.</p>`;
     return;
   }
@@ -446,14 +549,14 @@ function displayInstruction(bankData, type) {
     if (template) {
       let content = template.content;
       
-      // Заменяем плейсхолдеры
+      // Заменяем плейсхолдеры (БЕЗ кавычек вокруг названия банка)
       content = content.replace(/{BANK_NAME}/g, htmlEscape(bankData.bank || ''));
       content = content.replace(/{SCENARIO}/g, htmlEscape(scenario));
       
-      // Извлекаем ссылку из сценария если есть
-      const linkMatch = scenario.match(/https?:\/\/[^\s<>"]+/);
-      const link = linkMatch ? linkMatch[0] : '';
-      const linkHtml = link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">${link}</a>` : '';
+      // Ищем ссылку на листе "Ссылки на инструкции" по банку и номеру сценария
+      const link = findInstructionLink(bankData.bank, scenario);
+      console.log('Поиск ссылки для банка:', bankData.bank, 'сценарий:', scenario, 'найдена ссылка:', link);
+      const linkHtml = link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">${link}</a>` : 'ссылка не найдена';
       content = content.replace(/{LINK}/g, linkHtml);
       
       // Преобразуем переносы строк
