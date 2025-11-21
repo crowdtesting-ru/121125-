@@ -9,6 +9,7 @@ const $container = document.querySelector('.container');
 let excelData = null;
 let instructionTemplates = null;
 let instructionLinks = null; // Данные с листа "Ссылки на инструкции"
+let scenarioDescriptions = null; // Данные с листа "Описание сценариев"
 
 // Маппинг колонок банков
 const BANK_COLUMNS = {
@@ -175,6 +176,20 @@ async function loadExcelFile() {
     } else {
       instructionLinks = [];
     }
+    
+    // Загружаем данные с листа "Описание сценариев"
+    const descriptionsSheetName = workbook.SheetNames.find(name => 
+      name.toLowerCase().includes('описание') && name.toLowerCase().includes('сценари')
+    );
+    
+    if (descriptionsSheetName) {
+      // Читаем как JSON объекты (первая строка - заголовки)
+      const descriptionsSheet = workbook.Sheets[descriptionsSheetName];
+      const descriptionsData = XLSX.utils.sheet_to_json(descriptionsSheet, { defval: '' });
+      scenarioDescriptions = descriptionsData;
+    } else {
+      scenarioDescriptions = [];
+    }
 
     showStatus(`Excel загружен (${excelData.length} записей)`);
     return true;
@@ -258,6 +273,42 @@ function findInstructionLink(bankName, scenarioText) {
   }
   
   console.log('✗ ССЫЛКА НЕ НАЙДЕНА');
+  return '';
+}
+
+// Функция для поиска описания сценария по номеру
+function findScenarioDescription(scenarioText) {
+  if (!scenarioDescriptions || scenarioDescriptions.length === 0) {
+    return '';
+  }
+  
+  if (!scenarioText || typeof scenarioText !== 'string') {
+    return '';
+  }
+  
+  // Извлекаем номер сценария из текста (например, "Сценарий 1" -> "1")
+  const scenarioMatch = scenarioText.match(/сценарий\s*(\d+)/i);
+  if (!scenarioMatch) {
+    return '';
+  }
+  
+  const scenarioNumber = scenarioMatch[1];
+  
+  // Ищем описание в данных
+  for (const row of scenarioDescriptions) {
+    // Пробуем разные варианты названия колонки со сценарием
+    const scenarioCell = row['Сценарий'] || row['Сценарий '] || row['сценарий'] || '';
+    const scenarioCellStr = String(scenarioCell).trim();
+    
+    // Проверяем, содержит ли ячейка нужный номер сценария
+    if (scenarioCellStr.toLowerCase().includes(`сценарий ${scenarioNumber}`) || 
+        scenarioCellStr.toLowerCase().includes(`сценарий${scenarioNumber}`)) {
+      // Берем описание из колонки "Описание"
+      const description = row['Описание'] || row['Описание '] || row['описание'] || '';
+      return String(description).trim();
+    }
+  }
+  
   return '';
 }
 
@@ -549,9 +600,13 @@ function displayInstruction(bankData, type) {
     if (template) {
       let content = template.content;
       
+      // Ищем описание сценария
+      const scenarioDescription = findScenarioDescription(scenario);
+      
       // Заменяем плейсхолдеры (БЕЗ кавычек вокруг названия банка)
       content = content.replace(/{BANK_NAME}/g, htmlEscape(bankData.bank || ''));
       content = content.replace(/{SCENARIO}/g, htmlEscape(scenario));
+      content = content.replace(/{SCENARIO_DESCRIPTION}/g, htmlEscape(scenarioDescription || ''));
       
       // Ищем ссылку на листе "Ссылки на инструкции" по банку и номеру сценария
       const link = findInstructionLink(bankData.bank, scenario);
